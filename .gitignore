@@ -1,0 +1,11 @@
+node_modules/
+dist/
+web-frontend/dist/
+web-frontend/node_modules/
+.DS_Store
+config.agent.yaml
+.env
+.env.*
+coverage.out
+*.log
+*.tsbuildinfo

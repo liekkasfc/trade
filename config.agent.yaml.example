@@ -1,0 +1,10 @@
+saas_url: http://localhost:8080
+email: you@example.com
+password: change-me
+
+exchange:
+  name: bitget
+  api_key: YOUR_BITGET_API_KEY
+  secret_key: YOUR_BITGET_SECRET_KEY
+  passphrase: YOUR_BITGET_PASSPHRASE
+  sandbox: false
