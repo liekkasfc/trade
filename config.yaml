@@ -2,7 +2,7 @@ app_role: ${QUANTSAAS_APP_ROLE}
 
 server:
   host: 0.0.0.0
-  port: 8080
+  port: ${QUANTSAAS_SERVER_PORT}
   read_timeout_seconds: 15
   write_timeout_seconds: 15
 

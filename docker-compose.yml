@@ -39,13 +39,14 @@ services:
       - .env
     environment:
       QUANTSAAS_APP_ROLE: ${QUANTSAAS_APP_ROLE:-dev}
+      QUANTSAAS_SERVER_PORT: ${QUANTSAAS_SERVER_PORT:-18080}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${QUANTSAAS_SERVER_PORT:-18080}:${QUANTSAAS_SERVER_PORT:-18080}"
 
 volumes:
   quantsaas-postgres:

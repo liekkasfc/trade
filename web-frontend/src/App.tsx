@@ -227,8 +227,8 @@ type EquitySnapshotsEnvelope = {
 
 const defaultApiBase =
   typeof window === "undefined"
-    ? "http://localhost:8080"
-    : window.localStorage.getItem("quantsaas.apiBase") || "http://localhost:8080";
+    ? "http://localhost:18080"
+    : window.localStorage.getItem("quantsaas.apiBase") || "http://localhost:18080";
 const defaultToken =
   typeof window === "undefined" ? "" : window.localStorage.getItem("quantsaas.token") || "";
 

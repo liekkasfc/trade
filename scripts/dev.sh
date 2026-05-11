@@ -29,10 +29,7 @@ require_command npm
 require_command curl
 
 "$ROOT_DIR/scripts/ensure-env.sh"
-
-set -a
-source "$ROOT_DIR/.env"
-set +a
+source "$ROOT_DIR/scripts/export-env.sh"
 
 echo "starting postgres and redis with docker compose..."
 docker compose up -d postgres redis
@@ -43,12 +40,13 @@ if [[ ! -d "$ROOT_DIR/web-frontend/node_modules" ]]; then
   (cd "$ROOT_DIR/web-frontend" && npm ci)
 fi
 
-echo "starting SaaS backend on http://127.0.0.1:8080 ..."
+echo "starting SaaS backend on http://127.0.0.1:${QUANTSAAS_SERVER_PORT:-18080} ..."
 go run ./cmd/saas -config config.yaml &
 SAAS_PID="$!"
-"$ROOT_DIR/scripts/wait-for-http.sh" "http://127.0.0.1:8080/healthz" 60 >/dev/null
+"$ROOT_DIR/scripts/wait-for-http.sh" "http://127.0.0.1:${QUANTSAAS_SERVER_PORT:-18080}/healthz" 60 >/dev/null
 
 echo "SaaS is ready."
+echo "Backend is running on http://127.0.0.1:${QUANTSAAS_SERVER_PORT:-18080}"
 echo "Frontend will run on http://${QUANTSAAS_WEB_HOST:-127.0.0.1}:${QUANTSAAS_WEB_PORT:-4173}"
 echo "To enable the local agent later: make agent-config && edit config.agent.yaml && make agent"
 

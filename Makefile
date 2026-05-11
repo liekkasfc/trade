@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DOCKER_COMPOSE := docker compose
-GO_RUN_ENV := set -a && source .env && set +a
+GO_RUN_ENV := source "$(ROOT_DIR)/scripts/export-env.sh"
 
 .PHONY: help env deps-up deps-wait deps-down deps-reset saas saas-docker-up saas-docker-logs web-install web agent-config agent build test race smoke dev
 
@@ -57,8 +57,7 @@ race: ## Run the Go test suite with the race detector
 	@go test ./... -race -timeout 300s
 
 smoke: ## Check the local SaaS health endpoint
-	@"$(ROOT_DIR)/scripts/wait-for-http.sh" http://127.0.0.1:8080/healthz 60 >/dev/null
-	@curl -fsS http://127.0.0.1:8080/healthz
+	@bash -lc '$(GO_RUN_ENV) && "$(ROOT_DIR)/scripts/wait-for-http.sh" "http://127.0.0.1:$${QUANTSAAS_SERVER_PORT:-18080}/healthz" 60 >/dev/null && curl -fsS "http://127.0.0.1:$${QUANTSAAS_SERVER_PORT:-18080}/healthz"'
 
 dev: env ## Start deps, run SaaS locally, and launch the Vite frontend
 	@"$(ROOT_DIR)/scripts/dev.sh"
