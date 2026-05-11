@@ -9,3 +9,5 @@ config.agent.yaml
 coverage.out
 *.log
 *.tsbuildinfo
+*.exe
+bin/

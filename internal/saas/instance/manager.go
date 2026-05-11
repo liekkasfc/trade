@@ -11,6 +11,7 @@ import (
 
 	"quantsaas/internal/protocol"
 	"quantsaas/internal/quant"
+	"quantsaas/internal/saas/dashboard"
 	"quantsaas/internal/saas/ledger"
 	"quantsaas/internal/saas/marketdata"
 	"quantsaas/internal/saas/store"
@@ -159,6 +160,20 @@ func (m *Manager) Create(ctx context.Context, userID uint, req CreateRequest) (*
 			if err := tx.Create(&lot).Error; err != nil {
 				return err
 			}
+		}
+
+		if err := dashboard.RecordEquitySnapshot(ctx, tx, dashboard.SnapshotRecord{
+			StrategyInstanceID: instance.ID,
+			SnapshotTime:       now.UnixMilli(),
+			Source:             dashboard.SnapshotSourceCreate,
+			USDTBalance:        portfolio.USDTBalance,
+			DeadAssetQty:       portfolio.DeadBTC,
+			FloatAssetQty:      portfolio.FloatBTC,
+			ColdSealedAssetQty: portfolio.ColdSealedBTC,
+			TotalEquity:        portfolio.TotalEquity,
+			MarkPrice:          latestClose,
+		}); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -330,6 +345,19 @@ func (m *Manager) Tick(ctx context.Context, instanceID uint) error {
 			return err
 		}
 		if err := tx.Save(portfolio).Error; err != nil {
+			return err
+		}
+		if err := dashboard.RecordEquitySnapshot(ctx, tx, dashboard.SnapshotRecord{
+			StrategyInstanceID: instance.ID,
+			SnapshotTime:       latest.OpenTime,
+			Source:             dashboard.SnapshotSourceTick,
+			USDTBalance:        portfolio.USDTBalance,
+			DeadAssetQty:       portfolio.DeadBTC,
+			FloatAssetQty:      portfolio.FloatBTC,
+			ColdSealedAssetQty: portfolio.ColdSealedBTC,
+			TotalEquity:        portfolio.TotalEquity,
+			MarkPrice:          latest.Close,
+		}); err != nil {
 			return err
 		}
 

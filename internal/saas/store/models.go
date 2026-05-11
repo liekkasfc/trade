@@ -152,6 +152,19 @@ type BacktestTask struct {
 	ErrorText   string         `gorm:"type:text"`
 }
 
+type EquitySnapshot struct {
+	gorm.Model
+	StrategyInstanceID uint    `gorm:"not null;uniqueIndex:idx_equity_snapshot_instance_time"`
+	SnapshotTime       int64   `gorm:"not null;uniqueIndex:idx_equity_snapshot_instance_time;index"`
+	Source             string  `gorm:"size:32;not null;default:tick"`
+	USDTBalance        float64 `gorm:"not null;default:0"`
+	DeadAssetQty       float64 `gorm:"not null;default:0"`
+	FloatAssetQty      float64 `gorm:"not null;default:0"`
+	ColdSealedAssetQty float64 `gorm:"not null;default:0"`
+	TotalEquity        float64 `gorm:"not null;default:0"`
+	MarkPrice          float64 `gorm:"not null;default:0"`
+}
+
 type KLine struct {
 	gorm.Model
 	Symbol   string  `gorm:"size:64;not null;uniqueIndex:idx_kline_symbol_interval_open_time"`
@@ -178,6 +191,7 @@ func AllModels() []any {
 		&GeneRecord{},
 		&EvolutionTask{},
 		&BacktestTask{},
+		&EquitySnapshot{},
 		&KLine{},
 	}
 }

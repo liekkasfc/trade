@@ -102,6 +102,14 @@ h3 {
   gap: 18px;
 }
 
+.dashboard-shell,
+.dashboard-main,
+.dashboard-instance-list,
+.journey-grid {
+  display: grid;
+  gap: 18px;
+}
+
 .panel-switcher {
   display: flex;
   gap: 10px;
@@ -317,6 +325,31 @@ h3 {
   background: rgba(255, 255, 255, 0.55);
 }
 
+.dashboard-selector {
+  align-self: start;
+}
+
+.dashboard-instance-row {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.dashboard-instance-row:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.28);
+}
+
+.dashboard-instance-row-active {
+  border-color: rgba(15, 118, 110, 0.36);
+  box-shadow: 0 16px 28px rgba(15, 118, 110, 0.1);
+}
+
 .instance-label {
   margin: 0 0 6px;
   font-size: 0.8rem;
@@ -442,6 +475,38 @@ h3 {
   background: rgba(255, 255, 255, 0.65);
 }
 
+.chart-summary {
+  margin-top: 14px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.range-switch {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.range-button {
+  border: 1px solid rgba(24, 33, 41, 0.12);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.range-button-active {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: white;
+}
+
 .code-block {
   margin: 0;
   padding: 14px;
@@ -510,6 +575,11 @@ h3 {
     grid-template-columns: minmax(0, 1.8fr) minmax(260px, 0.8fr);
   }
 
+  .dashboard-shell {
+    grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.7fr);
+    align-items: start;
+  }
+
   .status-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -530,6 +600,10 @@ h3 {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .journey-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .coverage-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -539,6 +613,11 @@ h3 {
   }
 
   .instance-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .dashboard-instance-row {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
   }

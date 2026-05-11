@@ -10,6 +10,7 @@ import (
 
 	"quantsaas/internal/protocol"
 	"quantsaas/internal/quant"
+	"quantsaas/internal/saas/dashboard"
 	"quantsaas/internal/saas/ledger"
 	"quantsaas/internal/saas/marketdata"
 	"quantsaas/internal/saas/store"
@@ -53,6 +54,7 @@ func (h *Hub) processDeltaReport(ctx context.Context, userID uint, report protoc
 			Find(&lotRows).Error; err != nil {
 			return err
 		}
+		markPrice := latestPriceOrZero(h.marketData, ctx, instance.Symbol)
 
 		lots := ledger.NormalizeLotsForSnapshot(
 			ledger.QuantLots(lotRows),
@@ -63,13 +65,13 @@ func (h *Hub) processDeltaReport(ctx context.Context, userID uint, report protoc
 				ColdSealedAsset: portfolio.ColdSealedBTC,
 			},
 			time.UnixMilli(report.ReportedAt).UTC(),
-			latestPriceOrZero(h.marketData, ctx, instance.Symbol),
+			markPrice,
 		)
 
 		if report.Execution != nil {
 			price := report.Execution.FilledPrice
 			if price <= 0 {
-				price = latestPriceOrZero(h.marketData, ctx, instance.Symbol)
+				price = markPrice
 			}
 
 			var applyErr error
@@ -106,10 +108,10 @@ func (h *Hub) processDeltaReport(ctx context.Context, userID uint, report protoc
 			}
 		}
 
-		ledger.UpdatePortfolioFromLots(portfolio, lots, latestPriceOrZero(h.marketData, ctx, instance.Symbol))
+		ledger.UpdatePortfolioFromLots(portfolio, lots, markPrice)
 		if len(report.Balances) > 0 && countUserInstances(tx, ctx, userID) == 1 {
 			baseQty, usdtQty := extractBalances(instance.Symbol, report.Balances)
-			ledger.UpdatePortfolioFromBalances(portfolio, lots, baseQty, usdtQty, latestPriceOrZero(h.marketData, ctx, instance.Symbol))
+			ledger.UpdatePortfolioFromBalances(portfolio, lots, baseQty, usdtQty, markPrice)
 		} else if len(report.Balances) > 0 {
 			now := time.Now().UTC()
 			portfolio.LastSyncedAt = &now
@@ -119,6 +121,19 @@ func (h *Hub) processDeltaReport(ctx context.Context, userID uint, report protoc
 			return err
 		}
 		if err := tx.Save(portfolio).Error; err != nil {
+			return err
+		}
+		if err := dashboard.RecordEquitySnapshot(ctx, tx, dashboard.SnapshotRecord{
+			StrategyInstanceID: instance.ID,
+			SnapshotTime:       report.ReportedAt,
+			Source:             dashboard.SnapshotSourceDeltaReport,
+			USDTBalance:        portfolio.USDTBalance,
+			DeadAssetQty:       portfolio.DeadBTC,
+			FloatAssetQty:      portfolio.FloatBTC,
+			ColdSealedAssetQty: portfolio.ColdSealedBTC,
+			TotalEquity:        portfolio.TotalEquity,
+			MarkPrice:          markPrice,
+		}); err != nil {
 			return err
 		}
 
@@ -157,8 +172,22 @@ func (h *Hub) processAccountSnapshot(ctx context.Context, userID uint, report pr
 				return err
 			}
 			baseQty, usdtQty := extractBalances(instance.Symbol, report.Balances)
-			ledger.UpdatePortfolioFromBalances(portfolio, ledger.QuantLots(lotRows), baseQty, usdtQty, latestPriceOrZero(h.marketData, ctx, instance.Symbol))
+			markPrice := latestPriceOrZero(h.marketData, ctx, instance.Symbol)
+			ledger.UpdatePortfolioFromBalances(portfolio, ledger.QuantLots(lotRows), baseQty, usdtQty, markPrice)
 			if err := tx.Save(portfolio).Error; err != nil {
+				return err
+			}
+			if err := dashboard.RecordEquitySnapshot(ctx, tx, dashboard.SnapshotRecord{
+				StrategyInstanceID: instance.ID,
+				SnapshotTime:       report.ReportedAt,
+				Source:             dashboard.SnapshotSourceAccountBalance,
+				USDTBalance:        portfolio.USDTBalance,
+				DeadAssetQty:       portfolio.DeadBTC,
+				FloatAssetQty:      portfolio.FloatBTC,
+				ColdSealedAssetQty: portfolio.ColdSealedBTC,
+				TotalEquity:        portfolio.TotalEquity,
+				MarkPrice:          markPrice,
+			}); err != nil {
 				return err
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"quantsaas/internal/saas/auth"
 	"quantsaas/internal/saas/backtests"
 	"quantsaas/internal/saas/config"
+	"quantsaas/internal/saas/dashboard"
 	"quantsaas/internal/saas/datalab"
 	"quantsaas/internal/saas/epoch"
 	"quantsaas/internal/saas/instance"
@@ -22,6 +23,7 @@ type RouterDeps struct {
 	Cache           *store.Cache
 	AuthService     *auth.Service
 	Hub             *ws.Hub
+	Dashboard       *dashboard.Service
 	InstanceManager *instance.Manager
 	Backtests       *backtests.Service
 	Evolution       *epoch.Service
@@ -67,6 +69,9 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		userGroup.DELETE("/instances/:id", handleDeleteInstance(deps.InstanceManager))
 		userGroup.GET("/instances/:id/lots", handleListInstanceLots(deps.InstanceManager))
 		userGroup.GET("/instances/:id/trades", handleListInstanceTrades(deps.InstanceManager))
+		userGroup.GET("/dashboard", handleDashboard(deps.Dashboard))
+		userGroup.GET("/dashboard/equity-snapshots", handleEquitySnapshots(deps.Dashboard))
+		userGroup.GET("/system/status", handleSystemStatus(deps.Dashboard))
 		userGroup.GET("/agents/status", handleAgentStatus(deps.Hub))
 	}
 

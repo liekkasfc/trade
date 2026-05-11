@@ -16,6 +16,7 @@ import (
 	"quantsaas/internal/saas/backtests"
 	"quantsaas/internal/saas/config"
 	"quantsaas/internal/saas/cron"
+	"quantsaas/internal/saas/dashboard"
 	"quantsaas/internal/saas/datalab"
 	"quantsaas/internal/saas/epoch"
 	"quantsaas/internal/saas/instance"
@@ -76,6 +77,7 @@ func main() {
 	instanceManager := instance.NewManager(db.GormDB(), cache, hub, marketService, log)
 	backtestService := backtests.NewService(db.GormDB(), log)
 	evolutionService := epoch.NewService(db.GormDB(), cache, log)
+	dashboardService := dashboard.NewService(db.GormDB(), hub, cfg.AppRole)
 
 	router := api.NewRouter(api.RouterDeps{
 		Config:          cfg,
@@ -83,6 +85,7 @@ func main() {
 		Cache:           cache,
 		AuthService:     authService,
 		Hub:             hub,
+		Dashboard:       dashboardService,
 		InstanceManager: instanceManager,
 		Backtests:       backtestService,
 		Evolution:       evolutionService,

@@ -1,4 +1,4 @@
-app_role: dev
+app_role: ${QUANTSAAS_APP_ROLE}
 
 server:
   host: 0.0.0.0

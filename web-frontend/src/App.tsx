@@ -48,6 +48,71 @@ type AgentStatus = {
   last_heartbeat_at?: number;
 };
 
+type SystemStatus = {
+  app_role: string;
+  engine_status: string;
+  agent: AgentStatus;
+  reconcile_required: boolean;
+  server_time: number;
+};
+
+type DashboardSummary = {
+  instance_count: number;
+  running_instance_count: number;
+  stopped_instance_count: number;
+  error_instance_count: number;
+  total_equity: number;
+  total_usdt_balance: number;
+  total_dead_asset_qty: number;
+  total_float_asset_qty: number;
+  total_cold_sealed_asset_qty: number;
+};
+
+type DashboardInstanceOverview = {
+  id: number;
+  template_id: string;
+  template_name: string;
+  name: string;
+  symbol: string;
+  status: string;
+  capital_quota_usdt: number;
+  monthly_inject_usdt: number;
+  configured_cold_sealed_asset_qty: number;
+  max_drawdown_pct: number;
+  current_price: number;
+  usdt_balance: number;
+  dead_asset_qty: number;
+  float_asset_qty: number;
+  cold_sealed_asset_qty: number;
+  total_equity: number;
+  last_processed_bar_time: number;
+  last_synced_at?: number;
+  trade_count_total: number;
+  trade_count_month: number;
+  snapshot_count: number;
+  decision_count: number;
+  latest_snapshot_time?: number;
+  first_decision_time?: number;
+  created_at: number;
+  updated_at: number;
+};
+
+type DashboardOverview = {
+  summary: DashboardSummary;
+  instances: DashboardInstanceOverview[];
+};
+
+type EquitySnapshot = {
+  snapshot_time: number;
+  source: string;
+  usdt_balance: number;
+  dead_asset_qty: number;
+  float_asset_qty: number;
+  cold_sealed_asset_qty: number;
+  total_equity: number;
+  mark_price: number;
+};
+
 type EvolutionTask = {
   ID: number;
   StrategyID: string;
@@ -154,6 +219,12 @@ type EnvelopeBars = {
   bars: Bar[];
 };
 
+type EquitySnapshotsEnvelope = {
+  instance_id: number;
+  range_days: number;
+  snapshots: EquitySnapshot[];
+};
+
 const defaultApiBase =
   typeof window === "undefined"
     ? "http://localhost:8080"
@@ -201,6 +272,11 @@ export default function App() {
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardOverview | null>(null);
+  const [selectedInstanceID, setSelectedInstanceID] = useState<number | null>(() => readInstanceIDFromURL());
+  const [equityRangeDays, setEquityRangeDays] = useState<7 | 30 | 90>(30);
+  const [equitySnapshots, setEquitySnapshots] = useState<EquitySnapshot[]>([]);
 
   const [workspaceTemplateID, setWorkspaceTemplateID] = useState("core-btc-v1");
   const [instanceName, setInstanceName] = useState("");
@@ -264,9 +340,14 @@ export default function App() {
   const [csvFile, setCSVFile] = useState<File | null>(null);
 
   const signedIn = token.trim() !== "";
-  const labEnabled = health?.app_role === "dev" || health?.app_role === "lab";
+  const appRole = systemStatus?.app_role || health?.app_role || "unknown";
+  const labEnabled = appRole === "dev" || appRole === "lab";
   const runningEvolutionTask = evolutionTasks.find((task) => task.Status === "running") || null;
   const backtestRunning = backtestTask?.Status === "running";
+  const dashboardInstances = dashboardData?.instances || [];
+  const selectedDashboardInstance =
+    dashboardInstances.find((item) => item.id === selectedInstanceID) || dashboardInstances[0] || null;
+  const equityValues = equitySnapshots.map((item) => item.total_equity);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -321,6 +402,43 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [signedIn, labEnabled, backtestRunning, backtestTask, apiBase, token]);
 
+  useEffect(() => {
+    if (!signedIn) {
+      setEquitySnapshots([]);
+      return;
+    }
+    if (!selectedDashboardInstance) {
+      setEquitySnapshots([]);
+      return;
+    }
+    void loadEquitySnapshots(selectedDashboardInstance.id, equityRangeDays);
+  }, [signedIn, selectedDashboardInstance?.id, equityRangeDays, refreshKey, apiBase, token]);
+
+  useEffect(() => {
+    if (dashboardInstances.length === 0) {
+      if (selectedInstanceID !== null) {
+        setSelectedInstanceID(null);
+      }
+      return;
+    }
+
+    if (selectedInstanceID && dashboardInstances.some((item) => item.id === selectedInstanceID)) {
+      return;
+    }
+
+    const fromURL = readInstanceIDFromURL();
+    if (fromURL && dashboardInstances.some((item) => item.id === fromURL)) {
+      setSelectedInstanceID(fromURL);
+      return;
+    }
+
+    setSelectedInstanceID(dashboardInstances[0].id);
+  }, [dashboardInstances, selectedInstanceID]);
+
+  useEffect(() => {
+    writeInstanceIDToURL(selectedInstanceID);
+  }, [selectedInstanceID]);
+
   async function loadOverview() {
     try {
       const nextHealth = await apiFetch<Health>(apiBase, "/healthz", "");
@@ -335,22 +453,28 @@ export default function App() {
       setStrategies([]);
       setInstances([]);
       setAgentStatus(null);
+      setSystemStatus(null);
+      setDashboardData(null);
+      setEquitySnapshots([]);
       return;
     }
 
     setLoading(true);
     setError("");
     try {
-      const [mePayload, strategyPayload, instancePayload, nextAgentStatus] = await Promise.all([
+      const [mePayload, strategyPayload, instancePayload, nextSystemStatus, nextDashboardData] = await Promise.all([
         apiFetch<{ user: User }>(apiBase, "/api/v1/auth/me", token),
         apiFetch<EnvelopeStrategies>(apiBase, "/api/v1/strategies", token),
         apiFetch<EnvelopeInstances>(apiBase, "/api/v1/instances", token),
-        apiFetch<AgentStatus>(apiBase, "/api/v1/agents/status", token),
+        apiFetch<SystemStatus>(apiBase, "/api/v1/system/status", token),
+        apiFetch<DashboardOverview>(apiBase, "/api/v1/dashboard", token),
       ]);
       setMe(mePayload.user);
       setStrategies(strategyPayload.strategies);
       setInstances(instancePayload.instances);
-      setAgentStatus(nextAgentStatus);
+      setSystemStatus(nextSystemStatus);
+      setAgentStatus(nextSystemStatus.agent);
+      setDashboardData(nextDashboardData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspace");
     } finally {
@@ -414,6 +538,19 @@ export default function App() {
     }
   }
 
+  async function loadEquitySnapshots(instanceID: number, rangeDays: number) {
+    try {
+      const payload = await apiFetch<EquitySnapshotsEnvelope>(
+        apiBase,
+        `/api/v1/dashboard/equity-snapshots?instance_id=${instanceID}&range_days=${rangeDays}`,
+        token,
+      );
+      setEquitySnapshots(payload.snapshots);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load equity snapshots");
+    }
+  }
+
   async function refreshBacktestTask(id: number) {
     try {
       const nextTask = await apiFetch<BacktestTask>(apiBase, `/api/v1/backtests/${id}`, token);
@@ -455,6 +592,10 @@ export default function App() {
     setStrategies([]);
     setInstances([]);
     setAgentStatus(null);
+    setSystemStatus(null);
+    setDashboardData(null);
+    setSelectedInstanceID(null);
+    setEquitySnapshots([]);
     setEvolutionTasks([]);
     setGenomes([]);
     setChallengers([]);
@@ -471,7 +612,7 @@ export default function App() {
     setError("");
     setNotice("");
     try {
-      await apiFetch<Instance>(apiBase, "/api/v1/instances", token, {
+      const created = await apiFetch<Instance>(apiBase, "/api/v1/instances", token, {
         method: "POST",
         body: JSON.stringify({
           template_id: workspaceTemplateID,
@@ -484,6 +625,7 @@ export default function App() {
       });
       setNotice("实例已创建。");
       setInstanceName("");
+      setSelectedInstanceID(created.ID);
       startTransition(() => setRefreshKey((value) => value + 1));
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建实例失败");
@@ -673,10 +815,10 @@ export default function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">QuantSaaS v1 Workspace</p>
-          <h1>回测、进化、Data Lab 已经能连起来操作了</h1>
+          <h1>总览、曲线、回测和进化已经在同一套壳里连起来了</h1>
           <p className="lede">
-            这一版已经不只是骨架。你现在可以登录 SaaS、创建实例、看 Agent 状态、同步
-            Bitget 历史 K 线、导入 1h CSV、触发回测、启动 GA、审批 challenger。
+            这一版已经有了真实的 dashboard 数据面。你现在可以登录 SaaS、创建实例、看引擎和
+            Agent 状态、查看实例权益曲线，同时继续使用回测、GA 和 Data Lab。
           </p>
         </div>
         <div className="hero-meta">
@@ -691,14 +833,22 @@ export default function App() {
       </section>
 
       <section className="status-grid">
-        <StatusCard label="SaaS 健康" value={health?.status || "offline"} detail={health?.app_role || "unknown"} />
+        <StatusCard label="引擎状态" value={systemStatus?.engine_status || health?.status || "offline"} detail={appRole} />
         <StatusCard
           label="Agent 连接"
           value={agentStatus?.connected ? "online" : "offline"}
           detail={agentStatus?.version || "waiting"}
         />
-        <StatusCard label="策略模板" value={String(strategies.length)} detail="core-btc-v1 / core-eth-v1" />
-        <StatusCard label="实例数量" value={String(instances.length)} detail={loading ? "refreshing" : "synced"} />
+        <StatusCard
+          label="总权益"
+          value={formatMoney(dashboardData?.summary.total_equity)}
+          detail={`${dashboardData?.summary.running_instance_count || 0} running`}
+        />
+        <StatusCard
+          label="实例数量"
+          value={String(dashboardData?.summary.instance_count ?? instances.length)}
+          detail={loading ? "refreshing" : "synced"}
+        />
       </section>
 
       {(notice || error) && (
@@ -728,6 +878,194 @@ export default function App() {
 
       {activePanel === "workspace" && (
         <>
+          <section className="dashboard-shell">
+            <article className="card dashboard-selector">
+              <div className="card-heading">
+                <div>
+                  <h2>Dashboard</h2>
+                  <p className="muted">实例总览与选择</p>
+                </div>
+                <span className="muted">{dashboardInstances.length} instances</span>
+              </div>
+
+              {dashboardInstances.length === 0 ? (
+                <p className="empty-state">还没有可展示的实例。先创建一个 BTC 或 ETH 核心实例。</p>
+              ) : (
+                <div className="dashboard-instance-list">
+                  {dashboardInstances.map((item) => (
+                    <article
+                      className={`dashboard-instance-row ${selectedDashboardInstance?.id === item.id ? "dashboard-instance-row-active" : ""}`}
+                      key={item.id}
+                      onClick={() => setSelectedInstanceID(item.id)}
+                    >
+                      <div>
+                        <p className="instance-label">{item.template_id}</p>
+                        <h3>{item.name}</h3>
+                        <p className="instance-meta">
+                          {item.symbol} · 权益 {formatMoney(item.total_equity)}
+                        </p>
+                      </div>
+                      <div className="instance-actions">
+                        <span className={`badge badge-${item.status.toLowerCase()}`}>{item.status}</span>
+                        {item.status === "RUNNING" ? (
+                          <button
+                            className="ghost-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void mutateInstance(item.id, "stop");
+                            }}
+                          >
+                            停止
+                          </button>
+                        ) : (
+                          <button
+                            className="ghost-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void mutateInstance(item.id, "start");
+                            }}
+                          >
+                            启动
+                          </button>
+                        )}
+                        <button
+                          className="danger-button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void mutateInstance(item.id, "delete");
+                          }}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </article>
+
+            <div className="dashboard-main">
+              <article className="card">
+                <div className="card-heading">
+                  <div>
+                    <h2>策略概况</h2>
+                    <p className="muted">
+                      {selectedDashboardInstance
+                        ? `${selectedDashboardInstance.template_name} · ${selectedDashboardInstance.symbol}`
+                        : "选择一个实例查看详情"}
+                    </p>
+                  </div>
+                  {selectedDashboardInstance && (
+                    <span className={`badge badge-${selectedDashboardInstance.status.toLowerCase()}`}>
+                      {selectedDashboardInstance.status}
+                    </span>
+                  )}
+                </div>
+
+                {!selectedDashboardInstance ? (
+                  <p className="empty-state">当前没有实例可展示。</p>
+                ) : (
+                  <div className="metric-grid dashboard-metrics">
+                    <MetricCard
+                      label="总权益"
+                      value={formatMoney(selectedDashboardInstance.total_equity)}
+                      detail={`价格 ${formatMoney(selectedDashboardInstance.current_price)}`}
+                    />
+                    <MetricCard
+                      label="可用资金"
+                      value={formatMoney(selectedDashboardInstance.usdt_balance)}
+                      detail={`配额 ${formatMoney(selectedDashboardInstance.capital_quota_usdt)}`}
+                    />
+                    <MetricCard
+                      label="长期底仓"
+                      value={formatAsset(selectedDashboardInstance.dead_asset_qty, selectedDashboardInstance.symbol)}
+                      detail={`月投 ${formatMoney(selectedDashboardInstance.monthly_inject_usdt)}`}
+                    />
+                    <MetricCard
+                      label="浮动仓位"
+                      value={formatAsset(selectedDashboardInstance.float_asset_qty, selectedDashboardInstance.symbol)}
+                      detail={`冷封存 ${formatAsset(selectedDashboardInstance.cold_sealed_asset_qty, selectedDashboardInstance.symbol)}`}
+                    />
+                  </div>
+                )}
+              </article>
+
+              <article className="card">
+                <div className="card-heading">
+                  <div>
+                    <h2>PnL 净值曲线</h2>
+                    <p className="muted">
+                      {selectedDashboardInstance
+                        ? `${selectedDashboardInstance.name} · ${equitySnapshots.length} points`
+                        : "等待实例选择"}
+                    </p>
+                  </div>
+                  <div className="range-switch">
+                    {[7, 30, 90].map((range) => (
+                      <button
+                        className={`range-button ${equityRangeDays === range ? "range-button-active" : ""}`}
+                        key={range}
+                        onClick={() => setEquityRangeDays(range as 7 | 30 | 90)}
+                      >
+                        {range}D
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <SimpleLineChart values={equityValues} />
+                {equitySnapshots.length > 1 && (
+                  <div className="chart-summary">
+                    <span>起点 {formatMoney(equitySnapshots[0].total_equity)}</span>
+                    <span>最新 {formatMoney(equitySnapshots[equitySnapshots.length - 1].total_equity)}</span>
+                    <span>
+                      区间变化{" "}
+                      {formatMoney(
+                        equitySnapshots[equitySnapshots.length - 1].total_equity - equitySnapshots[0].total_equity,
+                      )}
+                    </span>
+                  </div>
+                )}
+              </article>
+
+              <article className="card">
+                <div className="card-heading">
+                  <div>
+                    <h2>策略旅程</h2>
+                    <p className="muted">运行节奏、决策与成交的最小画像</p>
+                  </div>
+                </div>
+
+                {!selectedDashboardInstance ? (
+                  <p className="empty-state">当前没有实例可展示。</p>
+                ) : (
+                  <div className="journey-grid">
+                    <MetricCard
+                      label="首次创建"
+                      value={formatTimestamp(selectedDashboardInstance.created_at)}
+                      detail={`首次决策 ${formatTimestamp(selectedDashboardInstance.first_decision_time)}`}
+                    />
+                    <MetricCard
+                      label="累计决策"
+                      value={String(selectedDashboardInstance.decision_count)}
+                      detail={`快照 ${selectedDashboardInstance.snapshot_count} 条`}
+                    />
+                    <MetricCard
+                      label="本月成交"
+                      value={String(selectedDashboardInstance.trade_count_month)}
+                      detail={`累计 ${selectedDashboardInstance.trade_count_total} 笔`}
+                    />
+                    <MetricCard
+                      label="最后更新"
+                      value={formatTimestamp(selectedDashboardInstance.latest_snapshot_time)}
+                      detail={`最近同步 ${formatTimestamp(selectedDashboardInstance.last_synced_at)}`}
+                    />
+                  </div>
+                )}
+              </article>
+            </div>
+          </section>
+
           <section className="workspace-grid">
             <article className="card">
               <div className="card-heading">
@@ -1373,6 +1711,13 @@ function formatNumber(value?: number) {
   return value.toFixed(4);
 }
 
+function formatAsset(value: number | undefined, symbol: string) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "--";
+  }
+  return `${value.toFixed(4)} ${baseAssetFromSymbol(symbol)}`;
+}
+
 function roleToBadge(role: string) {
   switch (role) {
     case "champion":
@@ -1382,4 +1727,37 @@ function roleToBadge(role: string) {
     default:
       return "deleted";
   }
+}
+
+function baseAssetFromSymbol(symbol: string) {
+  return symbol.endsWith("USDT") ? symbol.slice(0, -4) : symbol;
+}
+
+function readInstanceIDFromURL() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const raw = new URLSearchParams(window.location.search).get("instance");
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function writeInstanceIDToURL(instanceID: number | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  if (instanceID) {
+    url.searchParams.set("instance", String(instanceID));
+  } else {
+    url.searchParams.delete("instance");
+  }
+  window.history.replaceState({}, "", url.toString());
 }
