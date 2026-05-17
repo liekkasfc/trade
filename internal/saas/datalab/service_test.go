@@ -2,6 +2,7 @@ package datalab
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -55,5 +56,46 @@ func TestImportCSVAndCoverage(t *testing.T) {
 	}
 	if bars[1].Close != 61400 {
 		t.Fatalf("expected latest close 61400, got %.2f", bars[1].Close)
+	}
+}
+
+func TestImportCSVLargeBatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(store.AllModels()...); err != nil {
+		t.Fatalf("auto migrate: %v", err)
+	}
+
+	var builder strings.Builder
+	builder.WriteString("open_time,open,high,low,close,volume\n")
+	openTime := int64(1715385600000)
+	for i := 0; i < 1200; i++ {
+		fmt.Fprintf(&builder, "%d,%0.2f,%0.2f,%0.2f,%0.2f,%0.2f\n",
+			openTime+int64(i)*3600_000,
+			61000.0+float64(i),
+			61100.0+float64(i),
+			60900.0+float64(i),
+			61050.0+float64(i),
+			100.0+float64(i)/10.0,
+		)
+	}
+
+	service := NewService(db, nil)
+	result, err := service.ImportCSV(context.Background(), "ETHUSDT", strings.NewReader(builder.String()))
+	if err != nil {
+		t.Fatalf("import csv: %v", err)
+	}
+	if result.ProcessedRows != 1200 {
+		t.Fatalf("expected 1200 processed rows, got %d", result.ProcessedRows)
+	}
+
+	coverage, err := service.Coverage(context.Background(), "ETHUSDT")
+	if err != nil {
+		t.Fatalf("coverage: %v", err)
+	}
+	if len(coverage) != 1 || coverage[0].Count != 1200 {
+		t.Fatalf("expected coverage count 1200, got %+v", coverage)
 	}
 }

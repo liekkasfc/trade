@@ -24,6 +24,8 @@ var allowedSymbols = map[string]struct{}{
 	"ETHUSDT": {},
 }
 
+const importBatchSize = 500
+
 type SyncRequest struct {
 	Symbol string `json:"symbol"`
 	Limit  int    `json:"limit"`
@@ -34,6 +36,12 @@ type ImportResult struct {
 	ProcessedRows int    `json:"processed_rows"`
 	FirstOpenTime int64  `json:"first_open_time,omitempty"`
 	LastOpenTime  int64  `json:"last_open_time,omitempty"`
+}
+
+type SyncResult struct {
+	Symbol         string `json:"symbol"`
+	RequestedLimit int    `json:"requested_limit"`
+	FetchedBars    int    `json:"fetched_bars"`
 }
 
 type CoverageItem struct {
@@ -61,16 +69,24 @@ func AllowedSymbols() []string {
 	return []string{"BTCUSDT", "ETHUSDT"}
 }
 
-func (s *Service) Sync(ctx context.Context, req SyncRequest) error {
+func (s *Service) Sync(ctx context.Context, req SyncRequest) (SyncResult, error) {
 	symbol, err := normalizeSymbol(req.Symbol)
 	if err != nil {
-		return err
+		return SyncResult{}, err
 	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 600
 	}
-	return s.marketData.SyncRecent(ctx, symbol, limit)
+	fetched, err := s.marketData.SyncRecent(ctx, symbol, limit)
+	if err != nil {
+		return SyncResult{}, err
+	}
+	return SyncResult{
+		Symbol:         symbol,
+		RequestedLimit: limit,
+		FetchedBars:    fetched,
+	}, nil
 }
 
 func (s *Service) ImportCSV(ctx context.Context, symbol string, reader io.Reader) (ImportResult, error) {
@@ -102,15 +118,8 @@ func (s *Service) ImportCSV(ctx context.Context, symbol string, reader io.Reader
 	}
 
 	if err := s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "symbol"},
-				{Name: "interval"},
-				{Name: "open_time"},
-			},
-			DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume", "updated_at"}),
-		}).
-		Create(&kLines).Error; err != nil {
+		Clauses(klineUpsertClause()).
+		CreateInBatches(kLines, importBatchSize).Error; err != nil {
 		return ImportResult{}, err
 	}
 
@@ -120,6 +129,17 @@ func (s *Service) ImportCSV(ctx context.Context, symbol string, reader io.Reader
 		FirstOpenTime: kLines[0].OpenTime,
 		LastOpenTime:  kLines[len(kLines)-1].OpenTime,
 	}, nil
+}
+
+func klineUpsertClause() clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "symbol"},
+			{Name: "interval"},
+			{Name: "open_time"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume", "updated_at"}),
+	}
 }
 
 func (s *Service) Coverage(ctx context.Context, symbol string) ([]CoverageItem, error) {

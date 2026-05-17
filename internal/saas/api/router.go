@@ -1,6 +1,10 @@
 package api
 
 import (
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"quantsaas/internal/saas/auth"
@@ -63,16 +67,21 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		userGroup.GET("/strategies", handleListStrategies(deps.InstanceManager))
 		userGroup.GET("/strategies/:id", handleGetStrategy(deps.InstanceManager))
 		userGroup.GET("/instances", handleListInstances(deps.InstanceManager))
-		userGroup.POST("/instances", handleCreateInstance(deps.InstanceManager))
-		userGroup.POST("/instances/:id/start", handleStartInstance(deps.InstanceManager))
-		userGroup.POST("/instances/:id/stop", handleStopInstance(deps.InstanceManager))
-		userGroup.DELETE("/instances/:id", handleDeleteInstance(deps.InstanceManager))
 		userGroup.GET("/instances/:id/lots", handleListInstanceLots(deps.InstanceManager))
 		userGroup.GET("/instances/:id/trades", handleListInstanceTrades(deps.InstanceManager))
 		userGroup.GET("/dashboard", handleDashboard(deps.Dashboard))
 		userGroup.GET("/dashboard/equity-snapshots", handleEquitySnapshots(deps.Dashboard))
 		userGroup.GET("/system/status", handleSystemStatus(deps.Dashboard))
 		userGroup.GET("/agents/status", handleAgentStatus(deps.Hub))
+	}
+
+	instanceWriteGroup := userGroup.Group("/")
+	instanceWriteGroup.Use(requireInstanceWriteRole(deps.Config))
+	{
+		instanceWriteGroup.POST("/instances", handleCreateInstance(deps.InstanceManager))
+		instanceWriteGroup.POST("/instances/:id/start", handleStartInstance(deps.InstanceManager))
+		instanceWriteGroup.POST("/instances/:id/stop", handleStopInstance(deps.InstanceManager))
+		instanceWriteGroup.DELETE("/instances/:id", handleDeleteInstance(deps.InstanceManager))
 	}
 
 	labGroup := userGroup.Group("/")
@@ -92,7 +101,39 @@ func NewRouter(deps RouterDeps) *gin.Engine {
 		labGroup.GET("/data-lab/recent", handleGetDataLabRecent(deps.DataLab))
 	}
 
+	serveFrontendIfBuilt(router)
+
 	return router
+}
+
+func serveFrontendIfBuilt(router *gin.Engine) {
+	root, err := os.Getwd()
+	if err != nil {
+		return
+	}
+
+	distDir := filepath.Join(root, "web-frontend", "dist")
+	indexPath := filepath.Join(distDir, "index.html")
+
+	info, err := os.Stat(indexPath)
+	if err != nil || info.IsDir() {
+		return
+	}
+
+	router.Static("/assets", filepath.Join(distDir, "assets"))
+	router.StaticFile("/favicon.ico", filepath.Join(distDir, "favicon.ico"))
+
+	router.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/api/"),
+			strings.HasPrefix(path, "/ws/"),
+			path == "/healthz":
+			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		default:
+			c.File(indexPath)
+		}
+	})
 }
 
 func requestLogger(log *zap.Logger) gin.HandlerFunc {
@@ -114,6 +155,16 @@ func requireLabRole(cfg config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if cfg.AppRole != config.RoleLab && cfg.AppRole != config.RoleDev {
 			c.AbortWithStatusJSON(403, gin.H{"error": "lab routes are disabled for current app role"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func requireInstanceWriteRole(cfg config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cfg.AppRole != config.RoleSaaS && cfg.AppRole != config.RoleDev {
+			c.AbortWithStatusJSON(403, gin.H{"error": "instance write routes are disabled for current app role"})
 			return
 		}
 		c.Next()

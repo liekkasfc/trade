@@ -19,9 +19,15 @@ import (
 )
 
 const (
-	bitgetBaseURL = "https://api.bitget.com"
-	defaultLimit  = 600
+	defaultLimit      = 600
+	recentBatchLimit  = 1000
+	historyBatchLimit = 200
+	upsertBatchSize   = 500
 )
+
+var bitgetBaseURL = "https://api.bitget.com"
+var maxRecentBatchLimit = recentBatchLimit
+var maxHistoryBatchLimit = historyBatchLimit
 
 type Service struct {
 	db         *gorm.DB
@@ -42,7 +48,7 @@ func (s *Service) LoadRecent(ctx context.Context, symbol string, limit int) ([]q
 		limit = defaultLimit
 	}
 
-	syncErr := s.SyncRecent(ctx, symbol, limit)
+	_, syncErr := s.SyncRecent(ctx, symbol, limit)
 	bars, dbErr := s.loadFromDB(ctx, symbol, limit)
 	if dbErr == nil && len(bars) > 0 {
 		return bars, nil
@@ -61,13 +67,13 @@ func (s *Service) LatestClose(ctx context.Context, symbol string) float64 {
 	return bars[len(bars)-1].Close
 }
 
-func (s *Service) SyncRecent(ctx context.Context, symbol string, limit int) error {
+func (s *Service) SyncRecent(ctx context.Context, symbol string, limit int) (int, error) {
 	bars, err := s.fetchCandles(ctx, symbol, limit)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(bars) == 0 {
-		return fmt.Errorf("bitget returned no completed candles for %s", symbol)
+		return 0, fmt.Errorf("bitget returned no completed candles for %s", symbol)
 	}
 
 	rows := make([]store.KLine, 0, len(bars))
@@ -84,33 +90,113 @@ func (s *Service) SyncRecent(ctx context.Context, symbol string, limit int) erro
 		})
 	}
 
-	return s.db.WithContext(ctx).
-		Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "symbol"},
-				{Name: "interval"},
-				{Name: "open_time"},
-			},
-			DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume", "updated_at"}),
-		}).
-		Create(&rows).Error
+	if err := s.db.WithContext(ctx).
+		Clauses(klineUpsertClause()).
+		CreateInBatches(rows, upsertBatchSize).Error; err != nil {
+		return 0, err
+	}
+	return len(rows), nil
 }
 
 func (s *Service) fetchCandles(ctx context.Context, symbol string, limit int) ([]quant.Bar, error) {
 	if limit <= 0 {
 		limit = defaultLimit
 	}
+	if limit <= maxRecentBatchLimit {
+		return s.fetchRecentCandlesWindow(ctx, symbol, limit, time.Now().UTC().UnixMilli())
+	}
+
+	seen := make(map[int64]quant.Bar, limit)
+	collected := make([]quant.Bar, 0, limit)
+	recentBatch, err := s.fetchRecentCandlesWindow(ctx, symbol, maxRecentBatchLimit, time.Now().UTC().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	if len(recentBatch) == 0 {
+		return nil, fmt.Errorf("bitget returned no completed candles for %s", symbol)
+	}
+	appendUniqueBars(seen, &collected, recentBatch)
+
+	endTime := recentBatch[0].OpenTime - 1
+	for len(collected) < limit && endTime > 0 {
+		batchSize := limit - len(collected)
+		if batchSize > maxHistoryBatchLimit {
+			batchSize = maxHistoryBatchLimit
+		}
+
+		batch, err := s.fetchHistoryCandlesWindow(ctx, symbol, batchSize, endTime)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+
+		appendUniqueBars(seen, &collected, batch)
+		oldestOpenTime := batch[0].OpenTime
+		if oldestOpenTime <= 0 {
+			break
+		}
+		endTime = oldestOpenTime - 1
+	}
+
+	sort.Slice(collected, func(i, j int) bool {
+		return collected[i].OpenTime < collected[j].OpenTime
+	})
+	return collected, nil
+}
+
+func (s *Service) fetchRecentCandlesWindow(ctx context.Context, symbol string, limit int, endTime int64) ([]quant.Bar, error) {
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxRecentBatchLimit {
+		limit = maxRecentBatchLimit
+	}
+	if endTime <= 0 {
+		endTime = time.Now().UTC().UnixMilli()
+	}
 
 	query := url.Values{}
 	query.Set("symbol", symbol)
 	query.Set("granularity", "1h")
 	query.Set("limit", strconv.Itoa(limit))
-	query.Set("endTime", strconv.FormatInt(time.Now().UTC().UnixMilli(), 10))
+	query.Set("endTime", strconv.FormatInt(endTime, 10))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, bitgetBaseURL+"/api/v2/spot/market/candles?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
+
+	return s.executeCandlesRequest(req)
+}
+
+func (s *Service) fetchHistoryCandlesWindow(ctx context.Context, symbol string, limit int, endTime int64) ([]quant.Bar, error) {
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxHistoryBatchLimit {
+		limit = maxHistoryBatchLimit
+	}
+	if endTime <= 0 {
+		endTime = time.Now().UTC().UnixMilli()
+	}
+
+	query := url.Values{}
+	query.Set("symbol", symbol)
+	query.Set("granularity", "1h")
+	query.Set("limit", strconv.Itoa(limit))
+	query.Set("endTime", strconv.FormatInt(endTime, 10))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, bitgetBaseURL+"/api/v2/spot/market/history-candles?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.executeCandlesRequest(req)
+}
+
+func (s *Service) executeCandlesRequest(req *http.Request) ([]quant.Bar, error) {
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
@@ -181,6 +267,27 @@ func (s *Service) fetchCandles(ctx context.Context, symbol string, limit int) ([
 		return bars[i].OpenTime < bars[j].OpenTime
 	})
 	return bars, nil
+}
+
+func appendUniqueBars(seen map[int64]quant.Bar, collected *[]quant.Bar, batch []quant.Bar) {
+	for _, bar := range batch {
+		if _, ok := seen[bar.OpenTime]; ok {
+			continue
+		}
+		seen[bar.OpenTime] = bar
+		*collected = append(*collected, bar)
+	}
+}
+
+func klineUpsertClause() clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "symbol"},
+			{Name: "interval"},
+			{Name: "open_time"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{"open", "high", "low", "close", "volume", "updated_at"}),
+	}
 }
 
 func (s *Service) loadFromDB(ctx context.Context, symbol string, limit int) ([]quant.Bar, error) {

@@ -21,11 +21,12 @@ func handleSyncDataLab(service *datalab.Service) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
-		if err := service.Sync(c.Request.Context(), req); err != nil {
+		result, err := service.Sync(c.Request.Context(), req)
+		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "synced", "symbol": req.Symbol, "limit": req.Limit})
+		c.JSON(http.StatusOK, gin.H{"status": "synced", "symbol": result.Symbol, "limit": result.RequestedLimit, "fetched_bars": result.FetchedBars})
 	}
 }
 
