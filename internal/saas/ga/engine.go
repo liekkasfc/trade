@@ -22,6 +22,14 @@ import (
 
 const DefaultEvolutionInitialCapitalUSDT = 10000
 
+const (
+	DefaultTargetMaxDrawdown       = 0.42
+	DefaultDrawdownPenaltyFactor   = 4.0
+	DefaultTradeCountPenaltyFactor = 0.00002
+	DefaultFatalMaxDrawdown        = 0.88
+	DefaultBaselineDrawdownPenalty = 1.5
+)
+
 type ProgressUpdate struct {
 	Generation      int     `json:"generation"`
 	BestScore       float64 `json:"best_score"`
@@ -37,6 +45,7 @@ type EpochConfig struct {
 	LotMinQty          float64
 	OnProgress         func(ProgressUpdate)
 	SpawnPointOverride *quant.SpawnPoint
+	Fitness            FitnessConfig
 }
 
 type EpochResult struct {
@@ -236,7 +245,30 @@ func (e *Engine) buildPlan(ctx context.Context, spec strategies.Spec, cfg EpochC
 		LotStep:            cfg.LotStepSize,
 		LotMin:             cfg.LotMinQty,
 		InitialCapitalUSDT: DefaultEvolutionInitialCapitalUSDT,
+		Fitness:            NormalizeFitnessConfig(cfg.Fitness),
 	}, nil
+}
+
+func NormalizeFitnessConfig(cfg FitnessConfig) FitnessConfig {
+	if cfg.TargetMaxDrawdown <= 0 {
+		cfg.TargetMaxDrawdown = DefaultTargetMaxDrawdown
+	}
+	if cfg.DrawdownPenaltyFactor <= 0 {
+		cfg.DrawdownPenaltyFactor = DefaultDrawdownPenaltyFactor
+	}
+	if cfg.TradeCountPenaltyFactor < 0 {
+		cfg.TradeCountPenaltyFactor = 0
+	}
+	if cfg.TradeCountPenaltyFactor == 0 {
+		cfg.TradeCountPenaltyFactor = DefaultTradeCountPenaltyFactor
+	}
+	if cfg.FatalMaxDrawdown <= 0 {
+		cfg.FatalMaxDrawdown = DefaultFatalMaxDrawdown
+	}
+	if cfg.BaselineDrawdownPenalty <= 0 {
+		cfg.BaselineDrawdownPenalty = DefaultBaselineDrawdownPenalty
+	}
+	return cfg
 }
 
 func (e *Engine) initializePopulation(ctx context.Context, evolvable EvolvableStrategy, plan EvaluablePlan, popSize int, rng *rand.Rand) ([]Gene, error) {

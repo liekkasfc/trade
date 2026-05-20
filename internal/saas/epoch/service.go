@@ -26,11 +26,16 @@ const (
 )
 
 type CreateTaskRequest struct {
-	TemplateID     string            `json:"template_id"`
-	PopSize        int               `json:"pop_size"`
-	MaxGenerations int               `json:"max_generations"`
-	SpawnMode      string            `json:"spawn_mode"`
-	SpawnPoint     *quant.SpawnPoint `json:"spawn_point,omitempty"`
+	TemplateID              string            `json:"template_id"`
+	PopSize                 int               `json:"pop_size"`
+	MaxGenerations          int               `json:"max_generations"`
+	SpawnMode               string            `json:"spawn_mode"`
+	SpawnPoint              *quant.SpawnPoint `json:"spawn_point,omitempty"`
+	TargetMaxDrawdown       float64           `json:"target_max_drawdown,omitempty"`
+	DrawdownPenaltyFactor   float64           `json:"drawdown_penalty_factor,omitempty"`
+	TradeCountPenaltyFactor float64           `json:"trade_count_penalty_factor,omitempty"`
+	FatalMaxDrawdown        float64           `json:"fatal_max_drawdown,omitempty"`
+	BaselineDrawdownPenalty float64           `json:"baseline_drawdown_penalty,omitempty"`
 }
 
 type Service struct {
@@ -69,12 +74,25 @@ func (s *Service) CreateAndRunTask(ctx context.Context, req CreateTaskRequest) (
 		return nil, err
 	}
 
+	fitness := ga.NormalizeFitnessConfig(ga.FitnessConfig{
+		TargetMaxDrawdown:       req.TargetMaxDrawdown,
+		DrawdownPenaltyFactor:   req.DrawdownPenaltyFactor,
+		TradeCountPenaltyFactor: req.TradeCountPenaltyFactor,
+		FatalMaxDrawdown:        req.FatalMaxDrawdown,
+		BaselineDrawdownPenalty: req.BaselineDrawdownPenalty,
+	})
+
 	configJSON, _ := json.Marshal(map[string]any{
-		"template_id":     req.TemplateID,
-		"pop_size":        req.PopSize,
-		"max_generations": req.MaxGenerations,
-		"spawn_mode":      req.SpawnMode,
-		"spawn_point":     spawn,
+		"template_id":                req.TemplateID,
+		"pop_size":                   req.PopSize,
+		"max_generations":            req.MaxGenerations,
+		"spawn_mode":                 req.SpawnMode,
+		"spawn_point":                spawn,
+		"target_max_drawdown":        fitness.TargetMaxDrawdown,
+		"drawdown_penalty_factor":    fitness.DrawdownPenaltyFactor,
+		"trade_count_penalty_factor": fitness.TradeCountPenaltyFactor,
+		"fatal_max_drawdown":         fitness.FatalMaxDrawdown,
+		"baseline_drawdown_penalty":  fitness.BaselineDrawdownPenalty,
 	})
 	task := &store.EvolutionTask{
 		StrategyID: spec.Manifest.ID,
@@ -217,11 +235,20 @@ func (s *Service) run(taskID uint, req CreateTaskRequest, spawn quant.SpawnPoint
 		}
 	}
 
+	fitness := ga.NormalizeFitnessConfig(ga.FitnessConfig{
+		TargetMaxDrawdown:       req.TargetMaxDrawdown,
+		DrawdownPenaltyFactor:   req.DrawdownPenaltyFactor,
+		TradeCountPenaltyFactor: req.TradeCountPenaltyFactor,
+		FatalMaxDrawdown:        req.FatalMaxDrawdown,
+		BaselineDrawdownPenalty: req.BaselineDrawdownPenalty,
+	})
+
 	result, err := s.engine.RunEpoch(ctx, req.TemplateID, ga.EpochConfig{
 		PopSize:            req.PopSize,
 		MaxGenerations:     req.MaxGenerations,
 		SpawnPointOverride: &spawn,
 		OnProgress:         progressWriter,
+		Fitness:            fitness,
 	})
 	if err != nil {
 		s.logger.Error("evolution task failed", zap.Uint("task_id", taskID), zap.Error(err))

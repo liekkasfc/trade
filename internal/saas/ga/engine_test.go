@@ -59,6 +59,46 @@ func TestTournamentSelectPrefersHigherScore(t *testing.T) {
 	}
 }
 
+func TestScoreFitnessWindowPenalizesTargetDrawdownAndTrades(t *testing.T) {
+	cfg := NormalizeFitnessConfig(FitnessConfig{
+		TargetMaxDrawdown:       0.42,
+		DrawdownPenaltyFactor:   4.0,
+		TradeCountPenaltyFactor: 0.00002,
+		BaselineDrawdownPenalty: 1.5,
+	})
+
+	score := scoreFitnessWindow(0.20, 0.45, 0.40, 650, cfg)
+	want := 0.20 - 1.5*(0.45-0.40) - 4.0*(0.45-0.42) - 0.00002*650
+	if math.Abs(score-want) > 1e-12 {
+		t.Fatalf("expected score %.12f, got %.12f", want, score)
+	}
+
+	lowerRiskScore := scoreFitnessWindow(0.20, 0.41, 0.40, 650, cfg)
+	if lowerRiskScore <= score {
+		t.Fatalf("expected lower drawdown to score higher: low risk %.12f high risk %.12f", lowerRiskScore, score)
+	}
+}
+
+func TestNormalizeFitnessConfigDefaultsRiskControls(t *testing.T) {
+	cfg := NormalizeFitnessConfig(FitnessConfig{})
+
+	if cfg.TargetMaxDrawdown != DefaultTargetMaxDrawdown {
+		t.Fatalf("expected target drawdown %.2f, got %.2f", DefaultTargetMaxDrawdown, cfg.TargetMaxDrawdown)
+	}
+	if cfg.DrawdownPenaltyFactor != DefaultDrawdownPenaltyFactor {
+		t.Fatalf("expected drawdown penalty %.2f, got %.2f", DefaultDrawdownPenaltyFactor, cfg.DrawdownPenaltyFactor)
+	}
+	if cfg.TradeCountPenaltyFactor != DefaultTradeCountPenaltyFactor {
+		t.Fatalf("expected trade penalty %.5f, got %.5f", DefaultTradeCountPenaltyFactor, cfg.TradeCountPenaltyFactor)
+	}
+	if cfg.FatalMaxDrawdown != DefaultFatalMaxDrawdown {
+		t.Fatalf("expected fatal drawdown %.2f, got %.2f", DefaultFatalMaxDrawdown, cfg.FatalMaxDrawdown)
+	}
+	if cfg.BaselineDrawdownPenalty != DefaultBaselineDrawdownPenalty {
+		t.Fatalf("expected baseline penalty %.2f, got %.2f", DefaultBaselineDrawdownPenalty, cfg.BaselineDrawdownPenalty)
+	}
+}
+
 func setupTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})

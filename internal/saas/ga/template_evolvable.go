@@ -125,8 +125,8 @@ func (t *TemplateEvolvable) Evaluate(ctx context.Context, g Gene, plan Evaluable
 		}
 
 		alpha := result.ROI - baseline.ROI
-		sliceScore := alpha - 1.5*math.Max(0, result.MaxDrawdown-baseline.MaxDrawdown)
-		if result.MaxDrawdown >= 0.88 {
+		sliceScore := scoreFitnessWindow(alpha, result.MaxDrawdown, baseline.MaxDrawdown, result.TradeCount, plan.Fitness)
+		if result.MaxDrawdown >= plan.Fitness.FatalMaxDrawdown {
 			return FitnessResult{
 				ScoreTotal:  -99999,
 				MaxDrawdown: result.MaxDrawdown,
@@ -163,6 +163,13 @@ func (t *TemplateEvolvable) Evaluate(ctx context.Context, g Gene, plan Evaluable
 		TradeCount:   tradeCount,
 		WindowScores: windowScores,
 	}, nil
+}
+
+func scoreFitnessWindow(alpha, maxDrawdown, baselineMaxDrawdown float64, tradeCount int, cfg FitnessConfig) float64 {
+	baselineDDPenalty := cfg.BaselineDrawdownPenalty * math.Max(0, maxDrawdown-baselineMaxDrawdown)
+	targetDDPenalty := cfg.DrawdownPenaltyFactor * math.Max(0, maxDrawdown-cfg.TargetMaxDrawdown)
+	tradePenalty := cfg.TradeCountPenaltyFactor * float64(tradeCount)
+	return alpha - baselineDDPenalty - targetDDPenalty - tradePenalty
 }
 
 func (t *TemplateEvolvable) DecodeElite(raw json.RawMessage) Gene {

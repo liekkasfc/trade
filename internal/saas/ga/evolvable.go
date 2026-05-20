@@ -26,6 +26,7 @@ type EvaluablePlan struct {
 	LotStep            float64
 	LotMin             float64
 	InitialCapitalUSDT float64
+	Fitness            FitnessConfig
 }
 
 type FitnessResult struct {
@@ -33,6 +34,14 @@ type FitnessResult struct {
 	MaxDrawdown  float64
 	TradeCount   int
 	WindowScores []quant.CrucibleResult
+}
+
+type FitnessConfig struct {
+	TargetMaxDrawdown       float64 `json:"target_max_drawdown"`
+	DrawdownPenaltyFactor   float64 `json:"drawdown_penalty_factor"`
+	TradeCountPenaltyFactor float64 `json:"trade_count_penalty_factor"`
+	FatalMaxDrawdown        float64 `json:"fatal_max_drawdown"`
+	BaselineDrawdownPenalty float64 `json:"baseline_drawdown_penalty"`
 }
 
 type EvolvableStrategy interface {
