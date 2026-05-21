@@ -443,6 +443,7 @@ export default function App() {
     try {
       const nextHealth = await apiFetch<Health>(apiBase, "/healthz", "");
       setHealth(nextHealth);
+      setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load health status");
       return;
